@@ -19,7 +19,7 @@ import package
 
 
 webrtc_vad = webrtcvad.Vad()
-webrtc_vad.set_mode(0)
+webrtc_vad.set_mode(2)
 
 #使用vad找出段落
 
@@ -38,14 +38,16 @@ def vad_using(path):
     audio = path
     file_base_name = os.path.splitext(os.path.basename(audio))[0]
     y , sr = sf.read(audio)
-    y_bandpass = sd.bandpass_filter(y , sr, low_cut=0, high_cut=2500)
-    if y_bandpass.ndim > 1:
-        y_bandpass = np.mean(y_bandpass ,axis=1)
+    # y_bandpass = package.bandpass_filter(y , sr, low_cut=0, high_cut=2500)
+    # if y_bandpass.ndim > 1:
+    #     y_bandpass = np.mean(y_bandpass ,axis=1)
+    if y.ndim > 1:
+        y = np.mean(y, axis=1) 
     target_rate = 48000
-    y_resampled = np.clip(librosa.resample(y_bandpass, orig_sr=sr, target_sr=target_rate), -1, 1 )
+    y_resampled = np.clip(librosa.resample(y, orig_sr=sr, target_sr=target_rate), -1, 1 )
     y_int16 = (y_resampled * 32767).astype(np.int16)
 
-    base_dir = Path(r"C:\Users\howardhow\Desktop\sound detection\data")
+    base_dir = Path(r"C:\Users\ntuast\Desktop\Detection-And-Localization-of-Pig-Cough-in-Farm-main\data\test")
     out_dir = base_dir / file_base_name
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -91,7 +93,7 @@ def vad_using(path):
     package.modified_label(new_merge ,y ,sr ,out_dir ,file_base_name)
     return merged, y_resampled, target_rate, out_dir, file_base_name, compare_list
 
-merged, y_resampled, target_rate, out_dir, file_base_name, compare_list = vad_using(path=r"C:\Users\howardhow\Desktop\sound detection\data\rec0817-020007.wav")
+merged, y_resampled, target_rate, out_dir, file_base_name, compare_list = vad_using(path=r"C:\Users\ntuast\Desktop\近距離錄音\3\舊豬舍\第一欄中.wav")
 
 
 
@@ -101,11 +103,11 @@ print("wav count =", len(list(out_dir.glob("*.wav"))), flush=True)
 
 
 #使用model判斷是否為咳嗽聲
-model = tf.keras.models.load_model(r"C:\Users\howardhow\Desktop\sound detection\cough_cnn_model.h5")
+model = tf.keras.models.load_model(r"C:\Users\ntuast\Desktop\Detection-And-Localization-of-Pig-Cough-in-Farm-main\cough_cnn_model.h5")
 
 
 identify_list = []
-with open(r'C:\Users\howardhow\Desktop\sound detection\model_config.json', "r", encoding="utf-8") as f:
+with open(r'C:\Users\ntuast\Desktop\Detection-And-Localization-of-Pig-Cough-in-Farm-main\model_config.json', "r", encoding="utf-8") as f:
     config = json.load(f)
 
 n_mels = config["n_mels"]

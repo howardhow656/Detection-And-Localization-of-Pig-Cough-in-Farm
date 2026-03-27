@@ -15,4 +15,3 @@
 !package.py
 !model_config.json
 !cough_cnn_model.h5
-!vad.py
