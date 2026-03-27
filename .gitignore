@@ -1,0 +1,14 @@
+# Ignore everything by default
+*
+
+# Keep this file
+!.gitignore
+
+# Keep core project files mentioned for GitHub
+!audio_to_image.py
+!predict.py
+!model.py
+!sound_detection.py
+!vad.py
+!spetrogram.py
+!environment.yml
