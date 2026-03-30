@@ -101,11 +101,11 @@ print("wav count =", len(list(out_dir.glob("*.wav"))), flush=True)
 
 
 #使用model判斷是否為咳嗽聲
-model = tf.keras.models.load_model(r"C:\Users\howardhow\Desktop\sound detection\data\cough_cnn_model.h5")
+model = tf.keras.models.load_model(r"C:\Users\howardhow\Desktop\sound detection\cough_cnn_model.h5")
 
 
 identify_list = []
-with open(r"C:\Users\howardhow\Desktop\sound detection\data\model_config.json", "r", encoding="utf-8") as f:
+with open(r'C:\Users\howardhow\Desktop\sound detection\model_config.json', "r", encoding="utf-8") as f:
     config = json.load(f)
 
 n_mels = config["n_mels"]

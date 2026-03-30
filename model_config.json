@@ -1,0 +1,13 @@
+{
+    "n_mels": 40,
+    "hop_length": 160,
+    "T_fix": 414,
+    "sample_rate": 16000,
+    "normalize_audio": true,
+    "normalize_mfcc": true,
+    "bandpass": {
+        "low_cut": 200,
+        "high_cut": 2500,
+        "order": 8
+    }
+}
