@@ -38,7 +38,7 @@ def vad_using(path):
     audio = path
     file_base_name = os.path.splitext(os.path.basename(audio))[0]
     y , sr = sf.read(audio)
-    y_bandpass = sd.bandpass_filter(y , sr, low_cut=0, high_cut=2500)
+    y_bandpass = package.bandpass_filter(y , sr, low_cut=0, high_cut=2500)
     if y_bandpass.ndim > 1:
         y_bandpass = np.mean(y_bandpass ,axis=1)
     target_rate = 48000
