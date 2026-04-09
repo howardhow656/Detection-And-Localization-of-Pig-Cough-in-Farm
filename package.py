@@ -1,9 +1,11 @@
 import os
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+import librosa
 import soundfile as sf
 
 import sound_detection as sd
 import numpy as np
-import signal
+import scipy.signal as signal
 import audio_to_image as AtI
 
 from glob import glob
@@ -145,3 +147,22 @@ def bandpass_filter(
         return signal.sosfilt(sos, y)
 
 
+def spectrogram(y ,sr ,hop_length):
+    MIN_N = 2048
+    if len(y) < MIN_N:
+        y = np.pad(y, (0, MIN_N - len(y)), mode='constant')
+    D = np.abs(librosa.stft(y,hop_length=hop_length)) ** 2
+    return D
+
+
+def log_mel(y, sr, n_mels, hop_length):
+    """
+    回傳 log-mel spectrogram：(n_mels, T)
+    不再做 mfcc 的 DCT，而是直接用 log-mel 當特徵。
+    """
+    D = spectrogram(y, sr, hop_length)  # power spectrogram
+    mel_spectrogram = librosa.feature.melspectrogram(
+        S=D, sr=sr, n_mels=n_mels, hop_length=hop_length
+    )
+    log_mel = librosa.power_to_db(mel_spectrogram)  # 轉成 dB
+    return log_mel

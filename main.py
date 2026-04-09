@@ -1,12 +1,17 @@
+import os
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+
 from fastapi import FastAPI, Form, APIRouter
 import tensorflow as tf
-from router import model
+from router import process
 
 
 app = FastAPI()
 
 
-app.include_router(model.router, prefix="/model", tags=['Model'])
+
+
+app.include_router(process.router, prefix="/process", tags=['Model'])
 
 
 

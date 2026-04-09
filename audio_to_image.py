@@ -1,12 +1,15 @@
+import os
+os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
+
 import numpy as np
 import soundfile as sf 
 import librosa
-from scipy import signal
+import scipy.signal as signal
 import json
 
 
 
-with open(r"C:\Users\howardhow\Desktop\sound detection\data\model_config.json", "r", encoding="utf-8") as f:
+with open(r'model_config.json', "r", encoding="utf-8") as f:
     config = json.load(f)
 
 
