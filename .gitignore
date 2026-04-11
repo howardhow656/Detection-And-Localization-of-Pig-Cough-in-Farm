@@ -16,4 +16,5 @@
 !model_config.json
 !cough_cnn_model.h5
 !router/
+!router/**
 !main.py 
