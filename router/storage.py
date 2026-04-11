@@ -24,7 +24,7 @@ async def test_connection(db = Depends(get_db)):
     existing = await db.test.find_one({"msg": "hello"})
 
     if not existing:
-        await existing = db.test.insert_one({"msg": "hello"})
+        await db.test.insert_one({"msg": "hello"})
     return {"inserted_id": str(existing.inserted_id)}
 
 

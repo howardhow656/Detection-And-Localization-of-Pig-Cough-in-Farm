@@ -84,6 +84,7 @@ async def upload_audio (
 
         merged = []
         raw_time = []
+        index = 1
         if not speech_list:
             merged = []
         else:
@@ -93,18 +94,20 @@ async def upload_audio (
                 if s - end < 0.3:
                     end = e
                 else:
-                    merged.append([start,end])
+                    merged.append([index,start,end])
                     start,end = s,e
-            merged.append([start,end])
+                    index += 1
+            merged.append([index,start,end])
+            index += 1
 
         min_duration = 0.15 #s
         merged = [[s,e] for [s,e] in merged if (e - s) >= min_duration]
 
         with open(out_dir / "merge.csv", "w", newline="", encoding="utf-8") as f:
             w = csv.writer(f)
-            w.writerow(["Start",  "End", 'Label', "Probabiltiy"])
-            for s, e in merged:
-                w.writerow([f"{s:.6f}", f"{e:.6f}", '', ''])
+            w.writerow(['Index', "Start",  "End", 'Label', "Probabiltiy"])
+            for index, s, e in merged:
+                w.writerow([index, f"{s:.6f}", f"{e:.6f}", '', ''])
 
 
     except Exception as e:
