@@ -17,3 +17,4 @@
 !cough_cnn_model.h5
 !localization.py
 !local_package.py
+!label_to_json.py

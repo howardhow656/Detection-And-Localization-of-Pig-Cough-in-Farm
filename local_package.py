@@ -152,8 +152,7 @@ def slice_by_earliest_start(
     start_times,
     sample_rate: int,
     segment_sec: float = 0.5,
-    pre_buffer_sec: float = 0.0,
-    pad_mode: str = "constant",
+    pre_buffer_sec: float = 0.0
 ) -> torch.Tensor:
     """
     根據多支 mic 的起始時間，取最早時間作為切點，切固定長度音訊。
@@ -193,7 +192,11 @@ def slice_by_earliest_start(
     if len(start_times) != n_mics:
         raise ValueError(f"start_times 長度應等於 mic 數量，現在是 {len(start_times)} vs {n_mics}")
 
-    earliest_start_sec = float(min(start_times))
+    valid_starts = [t for t in start_times if t is not None]
+    if len(valid_starts) == 0:
+        raise ValueError("這筆 sample 沒有任何有效的 start_time")
+
+    earliest_start_sec = float(min(valid_starts))
     start_sec = max(0.0, earliest_start_sec - pre_buffer_sec)
 
     start_sample = int(round(start_sec * sample_rate))
@@ -201,12 +204,10 @@ def slice_by_earliest_start(
     end_sample = start_sample + segment_samples
 
     if start_sample >= n_samples:
-        # 起點超出音檔尾端，直接回傳全 0
         return torch.zeros((segment_samples, n_mics), dtype=torch.float32)
 
     segment = audio[start_sample:min(end_sample, n_samples), :]
 
-    # 如果尾端不夠長，補 0
     if segment.shape[0] < segment_samples:
         pad_len = segment_samples - segment.shape[0]
         pad = torch.zeros((pad_len, n_mics), dtype=segment.dtype, device=segment.device)
