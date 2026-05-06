@@ -1,11 +1,17 @@
 
 import itertools
-from typing import List, Tuple
+from typing import List, Tuple, Union
 import torch
 import torch.nn.functional as F
 from torch.utils.data import Dataset
-import soundfile as sf
+from scipy.io import wavfile
 import numpy as np
+from pathlib import Path
+import json
+from scipy.signal import resample_poly
+import torch.nn as nn
+import math
+
 
 
 def get_mic_pairs(n_mics: int) -> List[Tuple[int, int]]:
@@ -58,7 +64,7 @@ def stft_multichannel_torch(
 def gcc_phat_from_pair_stft(
     Xi: torch.Tensor,
     Xj: torch.Tensor,
-    max_tau: int = 20,
+    max_tau: int = 1024,
     eps: float = 1e-8,
 ) -> torch.Tensor:
     """
@@ -108,10 +114,10 @@ def gcc_phat_from_pair_stft(
 
 def extract_gcc_phat_feature(
     audio: torch.Tensor,
-    n_fft: int = 1024,
-    hop_length: int = 320,
-    win_length: int = 1024,
-    max_tau: int = 20,
+    n_fft: int = 2048,
+    hop_length: int = 512,
+    win_length: int = 2048,
+    max_tau: int = 1024,
 ) -> torch.Tensor:
     """
     從多通道音訊抽 GCC-PHAT feature
@@ -148,7 +154,7 @@ def extract_gcc_phat_feature(
 
 
 def slice_by_earliest_start(
-    audio: np.ndarray | torch.Tensor,
+    audio: ...,
     start_times,
     sample_rate: int,
     segment_sec: float = 0.5,
@@ -215,19 +221,36 @@ def slice_by_earliest_start(
 
     return segment
 
+def build_pair_mask_from_start_times(start_times, n_mics: int):
+    mic_valid = []
 
+    for t in start_times:
+        if t is None:
+            mic_valid.append(False)
+        elif isinstance(t, float) and np.isnan(t):
+            mic_valid.append(False)
+        else:
+            mic_valid.append(True)
+
+    pairs = get_mic_pairs(n_mics)
+
+    pair_mask = []
+    for i, j in pairs:
+        pair_mask.append(1.0 if mic_valid[i] and mic_valid[j] else 0.0)
+
+    return torch.tensor(pair_mask, dtype=torch.float32)
 
 class GCCPhatPathDataset(Dataset):
     def __init__(
         self,
         samples,
-        sample_rate=16000,
+        sample_rate=8000,
         segment_sec=0.5,
         pre_buffer_sec=0.02,
         n_fft=512,
-        hop_length=160,
-        win_length=512,
-        max_tau=20,
+        hop_length=512,
+        win_length=2048,
+        max_tau=900,
     ):
         self.samples = samples
         self.sample_rate = sample_rate
@@ -246,9 +269,23 @@ class GCCPhatPathDataset(Dataset):
         srs = []
 
         for p in audio_paths:
-            y, sr = sf.read(p, dtype="float32")
+            sr, y = wavfile.read(p)
+
+            # 轉 float32
+            if y.dtype == np.int16:
+                y = y.astype(np.float32) / 32768.0
+            elif y.dtype == np.int32:
+                y = y.astype(np.float32) / 2147483648.0
+            elif y.dtype == np.uint8:
+                y = (y.astype(np.float32) - 128) / 128.0
+            else:
+                y = y.astype(np.float32)
+
             if y.ndim > 1:
                 y = y.mean(axis=1)
+            if sr != self.sample_rate:
+                y = resample_poly(y, self.sample_rate, sr)
+                sr = self.sample_rate
             wavs.append(y)
             srs.append(sr)
 
@@ -269,7 +306,7 @@ class GCCPhatPathDataset(Dataset):
         item = self.samples[idx]
 
         audio = self._load_multichannel_audio(item["audio_paths"])
-        label = item["label"]
+        Position = int(item['Position'].split("-")[0]) - 1
         start_times = item["start_times"]
 
         segment = slice_by_earliest_start(
@@ -288,13 +325,66 @@ class GCCPhatPathDataset(Dataset):
             max_tau=self.max_tau,
         )
 
+        pair_mask = build_pair_mask_from_start_times(
+        start_times=start_times,
+        n_mics=feat.shape[0] if False else audio.shape[1]
+        )
         return {
             "x": feat,
-            "y": torch.tensor(label, dtype=torch.long),
+            "y": torch.tensor(Position, dtype=torch.long),
+            "pair_mask": pair_mask,
         }
 
+class CachedGCCDataset(Dataset):
+    def __init__(self, cache_dir):
+        self.cache_dir = Path(cache_dir)
 
+        with open(self.cache_dir / "index.json", "r", encoding="utf-8") as f:
+            self.files = json.load(f)
 
+    def __len__(self):
+        return len(self.files)
+
+    def __getitem__(self, idx):
+        item = torch.load(self.files[idx], weights_only=True)
+
+        return {
+            "x": item["x"].float(),
+            "pair_mask": item["pair_mask"].float(),
+            "y": item["y"].long()
+        }
+    
+
+def precompute_gcc_features(dataset, save_dir):
+    save_dir = Path(save_dir)
+    save_dir.mkdir(parents=True, exist_ok=True)
+
+    index_list = []
+
+    for i in range(len(dataset)):
+        item = dataset[i]   # 這裡會真的計算 GCC-PHAT
+
+        x = item["x"]
+        y = item["y"]
+        pair_mask = item["pair_mask"]
+
+        save_path = save_dir / f"sample_{i:06d}.pt"
+
+        torch.save({
+            "x": x.cpu(),
+            "pair_mask": pair_mask.cpu(),
+            "y": torch.tensor(y).long()
+        }, save_path)
+
+        index_list.append(str(save_path))
+
+        if i % 10 == 0:
+            print(f"Precomputed {i}/{len(dataset)}")
+
+    with open(save_dir / "index.json", "w", encoding="utf-8") as f:
+        json.dump(index_list, f, indent=4, ensure_ascii=False)
+
+    print(f"Done. Saved {len(index_list)} samples to {save_dir}")
 
 
 
@@ -304,16 +394,24 @@ def train_one_epoch(model, loader, optimizer, device):
     correct = 0
     total = 0
 
-    for batch in loader:
+    for batch_idx, batch in enumerate(loader):
+
         x = batch["x"].to(device)   # (B, P, T, G)
+        pair_mask = batch["pair_mask"].to(device)
         y = batch["y"].to(device)
 
+
+
         optimizer.zero_grad()
-        logits = model(x)
+        logits = model(x, pair_mask)
         loss = F.cross_entropy(logits, y)
         loss.backward()
         optimizer.step()
 
+        if batch_idx % 10 == 0:
+            print(f"Batch {batch_idx}/{len(loader)}, loss={loss.item():.4f}")
+        
+ 
         total_loss += loss.item() * x.size(0)
         pred = logits.argmax(dim=1)
         correct += (pred == y).sum().item()
@@ -331,9 +429,10 @@ def valid_one_epoch(model, loader, device):
 
     for batch in loader:
         x = batch["x"].to(device)
+        pair_mask = batch["pair_mask"].to(device)
         y = batch["y"].to(device)
 
-        logits = model(x)
+        logits = model(x, pair_mask)
         loss = F.cross_entropy(logits, y)
 
         total_loss += loss.item() * x.size(0)
@@ -342,3 +441,165 @@ def valid_one_epoch(model, loader, device):
         total += x.size(0)
 
     return total_loss / total, correct / total
+
+
+
+
+class GCC_CRNN(nn.Module):
+    def __init__(
+        self,
+        n_pairs: int = 3,
+        gcc_bins: int = 41,
+        num_classes: int = 3,
+        gru_hidden: int = 64,
+        dropout: float = 0.3,
+        use_pair_mask: bool = True,
+    ):
+        super().__init__()
+
+        self.use_pair_mask = use_pair_mask
+        in_channels = n_pairs * 2 if use_pair_mask else n_pairs
+
+
+        # CNN 部分：把 pair 當成 channel
+        self.conv1 = nn.Sequential(
+            nn.Conv2d(in_channels, 32, kernel_size=(3, 5), padding=(1, 2)),
+            nn.BatchNorm2d(32),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=(1, 2)),   # 只壓縮 GCC 軸
+        )
+
+        self.conv2 = nn.Sequential(
+            nn.Conv2d(32, 64, kernel_size=(3, 3), padding=(1, 1)),
+            nn.BatchNorm2d(64),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=(1, 2)),
+        )
+
+        self.conv3 = nn.Sequential(
+            nn.Conv2d(64, 128, kernel_size=(3, 3), padding=(1, 1)),
+            nn.BatchNorm2d(128),
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=(1, 2)),
+        )
+
+        # 推導 conv 後的 GCC 維度
+        reduced_gcc_bins = gcc_bins
+        for _ in range(3):
+            reduced_gcc_bins = math.floor(reduced_gcc_bins / 2)
+
+        if reduced_gcc_bins < 1:
+            raise ValueError("gcc_bins 太小，經過 pooling 後變 0 了")
+
+        self.feature_dim = 128 * reduced_gcc_bins
+
+        self.bigru = nn.GRU(
+            input_size=self.feature_dim,
+            hidden_size=gru_hidden,
+            num_layers=1,
+            batch_first=True,
+            bidirectional=True,
+        )
+
+        self.classifier = nn.Sequential(
+            nn.Linear(gru_hidden * 2, 128),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(128, num_classes),
+        )
+
+    def forward(self, x: torch.Tensor, pair_mask = None) -> torch.Tensor:
+        """
+        x: (B, P, T, G)
+        CNN expects (B, C, H, W)
+        這裡:
+           C = Pairs
+           H = Time
+           W = GCC bins
+        """
+
+        if pair_mask is None:
+            pair_mask = torch.ones(
+                x.shape[0], x.shape[1],
+                device=x.device,
+                dtype=x.dtype
+            )
+
+        mask_map = pair_mask[:, :, None, None].expand(
+            -1, -1, x.shape[2], x.shape[3]
+        )
+
+        x = torch.cat([x, mask_map], dim=1)  # (B, 2P, T, G)
+
+        x = self.conv1(x)   # (B, 32, T, G/2)
+        x = self.conv2(x)   # (B, 64, T, G/4)
+        x = self.conv3(x)   # (B,128, T, G/8)
+
+        # 轉成給 GRU 的格式：(B, T, feature_dim)
+        x = x.permute(0, 2, 1, 3).contiguous()   # (B, T, C, G')
+        b, t, c, g = x.shape
+        x = x.view(b, t, c * g)                  # (B, T, feature_dim)
+
+        x, _ = self.bigru(x)                     # (B, T, 2*hidden)
+
+        # clip-level 分類：時間平均池化
+        x = x.mean(dim=1)                        # (B, 2*hidden)
+
+        out = self.classifier(x)                # (B, num_classes)
+        return out
+    
+class Normal_CNN(nn.Module):
+    def __init__(
+        self,
+        n_pairs=3,
+        num_classes=3,
+        dropout=0.5,
+        use_pair_mask=True,
+    ):
+        super().__init__()
+
+        self.use_pair_mask = use_pair_mask
+        in_channels = n_pairs * 2 if use_pair_mask else n_pairs
+
+        self.conv = nn.Sequential(
+            nn.Conv2d(in_channels, 32, kernel_size=(3, 5), padding=(1, 2)),
+            nn.BatchNorm2d(32),
+            nn.ReLU(),
+            nn.MaxPool2d((2, 2)),
+
+            nn.Conv2d(32, 64, kernel_size=(3, 5), padding=(1, 2)),
+            nn.BatchNorm2d(64),
+            nn.ReLU(),
+            nn.MaxPool2d((2, 2)),
+
+            nn.Conv2d(64, 128, kernel_size=(3, 5), padding=(1, 2)),
+            nn.BatchNorm2d(128),
+            nn.ReLU(),
+        )
+
+        # ⭐ 關鍵：global pooling
+        self.global_pool = nn.AdaptiveAvgPool2d((1, 1))
+
+        self.classifier = nn.Sequential(
+            nn.Flatten(),
+            nn.Linear(128, 64),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(64, num_classes)
+        )
+
+    def forward(self, x, pair_mask=None):
+    # x: (B, P, T, G)
+
+            if self.use_pair_mask:
+                mask_map = pair_mask[:, :, None, None].expand(
+                    -1, -1, x.shape[2], x.shape[3]
+                )
+                x = torch.cat([x, mask_map], dim=1)
+
+            x = self.conv(x)
+
+            x = self.global_pool(x)  # (B, 128, 1, 1)
+
+            out = self.classifier(x)
+            return out

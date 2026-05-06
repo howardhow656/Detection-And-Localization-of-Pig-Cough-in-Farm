@@ -132,39 +132,48 @@ def build_samples_from_clusters(
     audio_paths: List[str],
 ) -> List[Dict[str, Any]]:
     samples = []
-
+    audio_paths_mod = [str(p) for p in audio_paths]
+    count = 0 
     for ev in clustered_events:
         samples.append({
-            "audio_paths": audio_paths,
+            "audio_paths": audio_paths_mod,
             "label": ev["label"],
+            'Position': ev['position'],
             "start_times": ev["start_times"],   # 可能含 None
         })
+        count += 1
 
-    return samples
+    return samples, count
 
 
 
 
-path1 = Path(r'')
-path2 = Path(r'')
-path3 = Path(r'')
+path1 = Path(r"C:\Users\howardhow\Desktop\sound detection\data\localization_data\1\label\第一欄.csv")
+path2 = Path(r"C:\Users\howardhow\Desktop\sound detection\data\localization_data\2\label\第一欄.csv")
+path3 = Path(r"C:\Users\howardhow\Desktop\sound detection\data\localization_data\3\label\第一欄.csv")
+audio_path1 = r"C:\Users\howardhow\Desktop\sound detection\data\localization_data\1\label\第一欄.wav"
+audio_path2 = r"C:\Users\howardhow\Desktop\sound detection\data\localization_data\2\label\第一欄.wav"
+audio_path3 = r"C:\Users\howardhow\Desktop\sound detection\data\localization_data\3\label\第一欄.wav"
+
 mic1 = load_data(path1)
 mic2 = load_data(path2)
 mic3 = load_data(path3)
 
-df = merge_events_from_all_mics(ann_tables=[mic1, mic2, mic3], mic_ids=[1,2,3], valid_labels=(1, 2, 3, 4))
+df = merge_events_from_all_mics(ann_tables=[mic1, mic2, mic3], mic_ids=[0,1,2], valid_labels=(1, 2, 3, 4))
 clustered = cluster_events_across_mics(
     merged_events=df,
     n_mics=3,
-    max_time_diff=0.35,
+    max_time_diff=0.5,
     min_mics_per_event=2,   # 至少 2 支 mic 才保留
 )
 
-samples = build_samples_from_clusters(
+samples, counts = build_samples_from_clusters(
     clustered_events=clustered,
-    audio_paths=[path1, path2, path3]
+    audio_paths=[audio_path1, audio_path2, audio_path3]
 )
 
 
-with open("samples.json", "w", encoding="utf-8") as f:
+with open(r"C:\Users\howardhow\Desktop\sound detection\data\localization_data\label\第一欄_Summary.json", "w", encoding="utf-8") as f:
     json.dump(samples, f, indent=2, ensure_ascii=False)
+
+print(f'總共{counts}筆資料')
